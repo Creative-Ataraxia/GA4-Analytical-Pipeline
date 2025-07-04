@@ -4,32 +4,32 @@
 A local, containerized data pipeline that ingests Google Analytics 4 (GA4) export data, lands it in an open-format lake, transforms it with PySpark, validates data contract with dbt tests, and produce two core product insights: conversion-funnel efficiency and session-level retention.
 
 ### Objectives
-	- Business
-		- Quantify drop-offs across the session → page_view → purchase funnel and measure next-day/next-week return visits.
-		- Stakeholder demo will show actionable numbers; funnel stages & retention tables refresh daily.
-	- Engineering
-		- Deliver a modular lakehouse stack that runs end-to-end on a single M5.xlarge instance (<4 vCPU, <16GB RAM).	
-		- Pipeline freshness ≤ 15 min for one day of data; all dbt tests pass.
-	- Benchmarking
-		- Airflow parity task that diffs row counts between Postgres tables and the dbt-ga4 counterparts; fail DAG if Δ > 0.5 %.
+	* Business
+		* Quantify drop-offs across the session → page_view → purchase funnel and measure next-day/next-week return visits.
+		* Stakeholder demo will show actionable numbers; funnel stages & retention tables refresh daily.
+	* Engineering
+		* Deliver a modular lakehouse stack that runs end-to-end on a single M5.xlarge instance (<4 vCPU, <16GB RAM).	
+		* Pipeline freshness ≤ 15 min for one day of data; all dbt tests pass.
+	* Benchmarking
+		* Airflow parity task that diffs row counts between Postgres tables and the dbt-ga4 counterparts; fail DAG if Δ > 0.5 %.
 
 
 ### Scope & Business Goals
-	- Conversion Funnel (session_start → page_view → purchase)
-		- Uses: event counts & timestamps.
-	- Session-Level Retention (D1, D7 return of user_pseudo_id)	
-		- Uses: user-pseudo-IDs; avoids PII.
-	- Traffic-Source Performance
-		- Uses: traffic_source fields; no lookup table needed at start.
-	- Governance / Access / Full catalog
-		- Roadmap: for later phase once the MVP proves out.
+	* Conversion Funnel (session_start → page_view → purchase)
+		* Uses: event counts & timestamps.
+	* Session-Level Retention (D1, D7 return of user_pseudo_id)	
+		* Uses: user-pseudo-IDs; avoids PII.
+	* Traffic-Source Performance
+		* Uses: traffic_source fields; no lookup table needed at start.
+	* Governance / Access / Full catalog
+		* Roadmap: for later phase once the MVP proves out.
 
 ### Data Sources
-	- Sample GA4 data from BigQuery public datasets (92 days)
+	* Sample GA4 data from BigQuery public datasets (92 days)
 
 ### Data Models
 | Table                     | Grain                 | Key Columns           | Purpose                                       |
-| ------------------------- | --------------------- | --------------------- | --------------------------------------------- |
+| ------------------------* | --------------------* | --------------------* | --------------------------------------------* |
 | **fact\_events**          | event                 | `event_id`            | Raw events after JSON flattening.             |
 | **fact\_sessions**        | GA4 session           | `session_id`          | Sessionisation logic reproduced from dbt-ga4. |
 | **dim\_user**             | user\_pseudo\_id      | `user_pseudo_id`      | Device & geo attrs at first touch.            |
@@ -45,14 +45,14 @@ A local, containerized data pipeline that ingests Google Analytics 4 (GA4) expor
 └────────────┘  (bronze)  └───────────┘   (silver)    └─────────┘ (gold) └──────────┘
                                                                      
 ```
-* Orchestration - Apache Airflow (docker-compose executor)
-* Transformations - PySpark 3.5 scripts (Bronze→Silver→Gold)
-* Validation & Docs - dbt-postgres (tests + lineage graph)
-* Containerization - Docker Compose; no IaC/Terraform in local
+* Orchestration * Apache Airflow (docker-compose executor)
+* Transformations * PySpark 3.5 scripts (Bronze→Silver→Gold)
+* Validation & Docs * dbt-postgres (tests + lineage graph)
+* Containerization * Docker Compose; no IaC/Terraform in local
 
 ### Stack
 | Layer             | Tool                      | Version | Notes                                                             |
-| ----------------- | ------------------------- | ------- | ----------------------------------------------------------------- |
+| ----------------* | ------------------------* | ------* | ----------------------------------------------------------------* |
 | Storage – raw     | MinIO                     | latest  | S3-compatible object store.                                       |
 | Processing        | Apache Spark              | 3.5     | Local standalone cluster.                                         |
 | Serving           | Postgres                  | 16      | Columnar ext optional (pg\_partman / Citus).                      |
@@ -62,7 +62,7 @@ A local, containerized data pipeline that ingests Google Analytics 4 (GA4) expor
 
 ### Implementation Phases
 | Phase                       | Deliverable                                    | Target Date |
-| --------------------------- | ---------------------------------------------- | ----------- |
+| --------------------------* | ---------------------------------------------* | ----------* |
 | **0. Bootstrap**            | Repo, docker-compose up, sample data in MinIO. | +3 days     |
 | **1. Bronze Ingest**        | Airflow DAG: load Parquet → MinIO bronze.      | +1 wk       |
 | **2. Silver Transform**     | PySpark flatten & schema enforcement.          | +2 wk       |
@@ -79,7 +79,7 @@ A local, containerized data pipeline that ingests Google Analytics 4 (GA4) expor
 
 ### Risk Register
 | Risk                                 | Impact             | Mitigation                                                    |
-| ------------------------------------ | ------------------ | ------------------------------------------------------------- |
+| -----------------------------------* | -----------------* | ------------------------------------------------------------* |
 | GA4 schema drift                     | Transform fail     | Use Spark’s `PERMISSIVE` mode; unit tests on schema.          |
 | PII Redacted sample limits depth     | Low business value | Stick to session-level metrics; clearly document data limits. |
 | Local hardware constraints           | Runtime failures   | Work on 30-day slices; scale up as needed.                    |
