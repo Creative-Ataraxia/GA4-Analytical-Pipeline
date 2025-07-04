@@ -4,25 +4,25 @@
 A local, containerized data pipeline that ingests Google Analytics 4 (GA4) export data, lands it in an open-format lake, transforms it with PySpark, validates data contract with dbt tests, and produce two core product insights: conversion-funnel efficiency and session-level retention.
 
 ### Objectives
-	* Business
-		* Quantify drop-offs across the session → page_view → purchase funnel and measure next-day/next-week return visits.
-		* Stakeholder demo will show actionable numbers; funnel stages & retention tables refresh daily.
-	* Engineering
-		* Deliver a modular lakehouse stack that runs end-to-end on a single M5.xlarge instance (<4 vCPU, <16GB RAM).	
-		* Pipeline freshness ≤ 15 min for one day of data; all dbt tests pass.
-	* Benchmarking
-		* Airflow parity task that diffs row counts between Postgres tables and the dbt-ga4 counterparts; fail DAG if Δ > 0.5 %.
+* Business
+  * Quantify drop-offs across the session → page_view → purchase funnel and measure next-day/next-week return visits.
+  * Stakeholder demo will show actionable numbers; funnel stages & retention tables refresh daily.
+* Engineering
+  * Deliver a modular lakehouse stack that runs end-to-end on a single M5.xlarge instance (<4 vCPU, <16GB RAM).	
+  * Pipeline freshness ≤ 15 min for one day of data; all dbt tests pass.
+* Benchmarking
+  * Airflow parity task that diffs row counts between Postgres tables and the dbt-ga4 counterparts; fail DAG if Δ > 0.5 %.
 
 
 ### Scope & Business Goals
-	* Conversion Funnel (session_start → page_view → purchase)
-		* Uses: event counts & timestamps.
-	* Session-Level Retention (D1, D7 return of user_pseudo_id)	
-		* Uses: user-pseudo-IDs; avoids PII.
-	* Traffic-Source Performance
-		* Uses: traffic_source fields; no lookup table needed at start.
-	* Governance / Access / Full catalog
-		* Roadmap: for later phase once the MVP proves out.
+* Conversion Funnel (session_start → page_view → purchase)
+  * Uses: event counts & timestamps.
+* Session-Level Retention (D1, D7 return of user_pseudo_id)	
+  * Uses: user-pseudo-IDs; avoids PII.
+* Traffic-Source Performance
+  * Uses: traffic_source fields; no lookup table needed at start.
+* Governance / Access / Full catalog
+  * Roadmap: for later phase once the MVP proves out.
 
 ### Data Sources
 	* Sample GA4 data from BigQuery public datasets (92 days)
