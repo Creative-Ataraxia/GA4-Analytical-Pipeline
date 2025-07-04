@@ -1,7 +1,8 @@
 ## GA4-to-Lakehouse e-Commerce Analytics Pipeline
-
-### Executive Summary
+ Executive Summary
 A local, containerized data pipeline that ingests Google Analytics 4 (GA4) export data, lands it in an open-format lake, transforms it with PySpark, validates data contract with dbt tests, and produce two core product insights: conversion-funnel efficiency and session-level retention.
+
+---
 
 ### Objectives
 * Business
@@ -13,6 +14,7 @@ A local, containerized data pipeline that ingests Google Analytics 4 (GA4) expor
 * Benchmarking
   * If Airflow parity task that diffs row counts between DB tables and dbt-ga4 model runs > 0.5 %, fail.
 
+---
 
 ### Scope & Business Goals
 * Conversion Funnel (session_start → page_view → purchase)
@@ -24,8 +26,12 @@ A local, containerized data pipeline that ingests Google Analytics 4 (GA4) expor
 * Governance / Access / Full catalog
   * Roadmap: for later phase once the MVP proves out.
 
+---
+
 ### Data Sources
 	* Sample GA4 data from BigQuery public datasets (92 days)
+
+---
 
 ### Data Models
 | Table                     | Grain                 | Key Columns           | Purpose                                       |
@@ -37,6 +43,8 @@ A local, containerized data pipeline that ingests Google Analytics 4 (GA4) expor
 | **dim\_traffic\_source**  | session               | `session_id`          | source / medium / campaign.                   |
 | **agg\_funnel\_daily**    | date × stage          | `event_date`, `stage` | Daily funnel counts.                          |
 | **agg\_retention\_daily** | cohort\_date × day\_n | keys above            | Session-level retention matrix.               |
+
+---
 
 ### Architecture (Local)
 ```ascii
@@ -50,6 +58,8 @@ A local, containerized data pipeline that ingests Google Analytics 4 (GA4) expor
 * Validation & Docs * dbt-postgres (tests + lineage graph)
 * Containerization * Docker Compose; no IaC/Terraform in local
 
+---
+
 ### Stack
 | Layer             | Tool                      | Version | Notes                                                             |
 | ----------------- | ------------------------- | ------- | ----------------------------------------------------------------- |
@@ -59,6 +69,8 @@ A local, containerized data pipeline that ingests Google Analytics 4 (GA4) expor
 | Modelling / Tests | **dbt**                   | 1.8     | Adapter: `dbt-postgres`; installs `dbt-ga4` package as reference. |
 | Orchestration     | Airflow                   | 2.9     | One DAG per layer.                                                |
 | Dev tools         | Makefile, pre-commit, tox | –       | Ensures repeatable local runs.                                    |
+
+---
 
 ### Implementation Phases
 | Phase                       | Deliverable                                    | Target Date |
@@ -71,11 +83,15 @@ A local, containerized data pipeline that ingests Google Analytics 4 (GA4) expor
 | **5. Insights**             | SQL queries + simple dashboard (Superset).     | +5 wk       |
 | **6. Documentation & Demo** | `dbt docs`, README, demo video.                | +6 wk       |
 
+---
+
 ### Success Metrics
 * Latency: ≤ 15 min for one-day slice end-to-end.
 * dbt test pass rate: 100 % on not_null/unique checks.
 * Parity: Δ row_count ≤ 0.5 % per table vs. dbt-ga4 package.
 * Resource footprint: Fits in a single M5.xlarge EC2 instance.
+
+---
 
 ### Risk Register
 | Risk                                 | Impact             | Mitigation                                                    |
@@ -84,6 +100,8 @@ A local, containerized data pipeline that ingests Google Analytics 4 (GA4) expor
 | PII Redacted sample limits depth     | Low business value | Stick to session-level metrics; clearly document data limits. |
 | Local hardware constraints           | Runtime failures   | Work on 30-day slices; scale up as needed.                    |
 | Airflow instability                  | Delays             | Healthchecks + DAG import test in CI.                         |
+
+---
 
 ### Roadmap
 * Data Quality / Observability – Great Expectations suites, OpenLineage registration.
