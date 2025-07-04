@@ -11,7 +11,7 @@ A local, containerized data pipeline that ingests Google Analytics 4 (GA4) expor
 		- Deliver a modular lakehouse stack that runs end-to-end on a single M5.xlarge instance (<4 vCPU, <16GB RAM).	
 		- Pipeline freshness ≤ 15 min for one day of data; all dbt tests pass.
 	- Benchmarking
-		- In Airflow, add a parity task that diffs row counts & selected sums between your Postgres tables and the dbt-ga4 counterparts; fail DAG if Δ > 0.5 %.
+		- Airflow parity task that diffs row counts between Postgres tables and the dbt-ga4 counterparts; fail DAG if Δ > 0.5 %.
 
 
 ### Scope & Business Goals
