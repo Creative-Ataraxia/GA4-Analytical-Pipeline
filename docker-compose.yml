@@ -1,0 +1,141 @@
+# ─────────
+#  Network
+# ─────────
+networks:
+  ga4-net:
+    driver: bridge
+
+# ─────────
+#  Volumes
+# ─────────
+volumes:
+  minio-data:
+  postgres-data:
+  airflow-logs:
+  spark-events:
+
+# ──────────
+#  Services
+# ──────────
+services:
+
+  # 1. MinIO ─ S3-compatible object store
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER:     minio
+      MINIO_ROOT_PASSWORD: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    networks: [ ga4-net ]
+
+  # 2. Postgres ─ analytics + Airflow metadata
+  postgres:
+    image: postgres:latest
+    environment:
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB:       ga4
+    ports: [ "5432:5432" ]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [ ga4-net ]
+
+  # 3. Spark Master
+  spark-master:
+    image: bitnami/spark:latest          # pin later, e.g. 3.5.1
+    environment:
+      SPARK_MODE: master
+    depends_on: [ minio, postgres ]
+    ports:
+      - "7077:7077"
+      - "8080:8080"
+    volumes:
+      - spark-events:/opt/spark-events
+    networks: [ ga4-net ]
+
+  # 4. Spark Worker (scale out with `--scale spark-worker=2`)
+  spark-worker:
+    image: bitnami/spark:latest
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+    depends_on: [ spark-master ]
+    ports:
+      - "8081:8081"
+    volumes:
+      - spark-events:/opt/spark-events
+    networks: [ ga4-net ]
+
+  # 5. Airflow (init → web + scheduler pattern)
+  airflow-init:
+    image: apache/airflow:latest
+    environment: &airflow-env
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://postgres:postgres@postgres:5432/ga4
+      AIRFLOW__CORE__FERNET_KEY: d3faultfernetkey
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__LOAD_DEFAULT_CONNECTIONS: "false"
+      AIRFLOW_HOME: /opt/airflow
+    entrypoint: |
+      bash -c "
+        airflow db init &&
+        airflow users create \
+          --username admin --firstname Admin --lastname User \
+          --role Admin --password admin --email admin@example.com
+      "
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - airflow-logs:/opt/airflow/logs
+    networks: [ ga4-net ]
+    depends_on: [ postgres ]
+
+  airflow-webserver:
+    image: apache/airflow:latest
+    environment: *airflow-env
+    command: webserver
+    ports: [ "8088:8080" ]
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - airflow-logs:/opt/airflow/logs
+    networks: [ ga4-net ]
+    depends_on: [ airflow-init ]
+
+  airflow-scheduler:
+    image: apache/airflow:latest
+    environment: *airflow-env
+    command: scheduler
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - airflow-logs:/opt/airflow/logs
+    networks: [ ga4-net ]
+    depends_on: [ airflow-init ]
+
+  # 6. dbt CLI (tests + parity diff)
+  dbt:
+    image: ghcr.io/dbt-labs/dbt-postgres:1.8.0
+    environment:
+      DBT_PROFILES_DIR: /workspace/profiles
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ga4
+    volumes:
+      - ./dbt:/workspace
+    networks: [ ga4-net ]
+    depends_on: [ postgres ]
+
+  # 7. Optional Jupyter notebook
+  pyspark-notebook:
+    image: jupyter/pyspark-notebook:python-3.11
+    environment:
+      SPARK_MASTER: spark://spark-master:7077
+    ports: [ "8888:8888" ]
+    networks: [ ga4-net ]
+    depends_on: [ spark-master ]

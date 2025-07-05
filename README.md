@@ -104,10 +104,12 @@ A local, containerized data pipeline that ingests Google Analytics 4 (GA4) expor
 ---
 
 ### Roadmap
-* Data Quality / Observability – Great Expectations suites, OpenLineage registration.
-* CI/CD & IaC – GitHub Actions, Terraform modules for S3 + EKS deployment.
-* Catalog / Schema Registry – DataHub or Glue + Iceberg table format.
+* Data Quality / Observability – `Great Expectations`.
+* Data Governance – `Apache Atlas` / `OpenMetadata`.
+* Monitoring / Alerting – `Prometheus` / `Grafana`.
+* AI/ML Integration – `MLflow` for model tracking and `Feast` for feature store integration.
+* CI/CD & IaC – `GitHub Actions`, `Kubernetes` for GitOps deployment, and `Terraform` for S3 + EKS deployment.
+* Lakehouse – `Glue` + `Iceberg` / `Hudi` table format.
 * Security & Privacy – PII masking, row-level IAM, bucket encryption.
 * Transform Shift to dbt-Spark – Replace PySpark scripts with dbt models to unify lineage.
 * Real-time Ingestion – GA4 Realtime API → Kafka → Spark Structured Streaming.
-* Advanced Analytics – ML features for churn prediction, anomaly detection.
