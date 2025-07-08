@@ -1,5 +1,4 @@
 postgres-data
 minio-data
 spark-events
-airflow-log
 raw-data

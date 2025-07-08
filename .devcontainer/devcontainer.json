@@ -1,0 +1,29 @@
+// .devcontainer/devcontainer.json
+{
+  "name": "ga4-dev",
+  "build": {
+    "context": "..",                        // repo root
+    "dockerfile": "Dockerfile"  // path inside repo
+  },
+  "remoteUser": "root",
+  "workspaceFolder": "/workspace",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.shell.linux": "/bin/bash",
+        "python.analysis.extraPaths": [
+          "/workspace/dags",
+          "/workspace/plugins"
+        ]
+      },
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance"
+      ]
+    }
+  },
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/workspace,type=bind"
+  ],
+  "postCreateCommand": "pip install --upgrade pip && pip install -r requirements.txt"
+}

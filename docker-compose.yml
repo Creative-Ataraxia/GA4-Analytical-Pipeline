@@ -23,14 +23,15 @@ x-airflow-common:
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
-    # AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/' # Only required if you run tasks via remote Execution API.
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/' # important! scheduler relies on it to run tasks
+    AIRFLOW__API_AUTH__JWT_SECRET: 'superS3cretKey_YouMustKeepItSafe' # important! otherwise calls will fail on authentication.
     # AIRFLOW__LOGGING__LOGGING_LEVEL: 'DEBUG'
   volumes: &airflow-common-volumes
-    - ./dags:/opt/airflow/dags
     - ./raw-data:/opt/airflow/raw-data/
-    - ./airflow-log:/opt/airflow/logs
-    - ./airflow-config:/opt/airflow/config
-    - ./airflow-plugins:/opt/airflow/plugins
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/airflow-log:/opt/airflow/logs
+    - ./airflow/airflow-config:/opt/airflow/config
+    - ./airflow/airflow-plugins:/opt/airflow/plugins
   depends_on: &airflow-common-depends
     minio:
       condition: service_healthy
@@ -96,7 +97,7 @@ services:
 # 3. Airflow Services
 # ────────────────────
   airflow-init:
-    image: apache/airflow:3.0.2
+    image: ga4-airflow:3.0.2
     container_name: airflow-init
     command: version
     networks: [ga4-net]
@@ -115,7 +116,7 @@ services:
         condition: service_healthy
 
   airflow-apiserver:
-    image: apache/airflow:3.0.2
+    image: ga4-airflow:3.0.2
     container_name: airflow-apiserver
     command: api-server
     networks: [ga4-net]
@@ -134,7 +135,7 @@ services:
     depends_on: *airflow-common-depends
 
   airflow-scheduler:
-    image: apache/airflow:3.0.2
+    image: ga4-airflow:3.0.2
     container_name: airflow-scheduler
     command: scheduler
     networks: [ga4-net]
@@ -152,7 +153,7 @@ services:
     depends_on: *airflow-common-depends
 
   airflow-dag-processor:
-    image: apache/airflow:3.0.2
+    image: ga4-airflow:3.0.2
     container_name: airflow-dag-processor
     command: dag-processor
     networks: [ga4-net]
@@ -170,7 +171,7 @@ services:
     depends_on: *airflow-common-depends
 
   airflow-triggerer:
-    image: apache/airflow:3.0.2
+    image: ga4-airflow:3.0.2
     container_name: airflow-triggerer
     command: triggerer
     networks: [ga4-net]
@@ -191,7 +192,7 @@ services:
 # 4. Spark Services
 # ──────────────────
   spark-master:
-    image: bitnami/spark:4.0.0
+    image: apache/spark:4.0.0
     container_name: spark-master
     networks:
       - ga4-net
@@ -211,7 +212,7 @@ services:
         condition: service_healthy
 
   spark-worker:
-    image: bitnami/spark:4.0.0   # don't include 'container_name', can't scale; docker name: ga4-analytical-pipeline-spark-worker-1
+    image: apache/spark:4.0.0   # don't include 'container_name', can't scale; docker name: ga4-analytical-pipeline-spark-worker-1
     environment:
       SPARK_MODE: worker
       SPARK_MASTER_URL: spark://spark-master:7077

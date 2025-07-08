@@ -1,0 +1,182 @@
+import os
+import shutil
+import logging
+from datetime import datetime, timedelta
+import textwrap
+
+import boto3
+from botocore.client import Config
+from botocore.exceptions import ClientError
+
+from airflow import DAG
+from airflow.providers.standard.operators.python import PythonOperator
+from airflow.providers.standard.operators.bash import BashOperator
+
+
+default_args = {
+    'owner': 'airflow',
+    'start_date': datetime(2023, 1, 1),
+    'retries': 0,
+    'retry_delay': timedelta(minutes=5)
+}
+
+# dag_params
+raw_bucket = "ga4-bronze"
+local_raw_dir = "/opt/airflow/raw-data"
+tmp_dir = "/opt/airflow/tmp"
+
+
+def extract_raw_data(**kwargs):
+    """
+    Batch extract raw GA4 data from local source.
+    """
+
+    # Task Configs
+    today = datetime.today().strftime("%y%m%d")
+    extracted = 0
+
+    # Connect to MinIO via boto3
+    s3 = boto3.client(
+        "s3",
+        endpoint_url="http://minio:9000",
+        aws_access_key_id="minio",
+        aws_secret_access_key="miniopass",
+        region_name="us-east-1",  # required dummy value
+    )
+
+    # Create /tmp/ if missing
+    os.makedirs(tmp_dir, exist_ok=True)
+
+    for fname in os.listdir(local_raw_dir):
+        if not fname.endswith(".parquet"):
+            logging.warning(f"skipping {fname} because it doesn't ends in parquet")
+            continue
+
+        # skip today's file
+        if today in fname:
+            logging.warning(f"skipping {fname} because it's today's ongoing data")
+            continue
+
+        local_path = os.path.join(local_raw_dir, fname)
+        object_key = f"raw/{fname}"  # destination key in bucket
+
+        # check if already in S3 (MinIO)
+        try:
+            s3.head_object(Bucket=raw_bucket, Key=object_key)
+            logging.info(f"Skipped {fname} because it already exists in destination bucket")
+            continue
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "404":
+                raise  # real error → fail fast
+
+        # copy to /tmp/
+        dest_path = os.path.join(tmp_dir, fname)
+        shutil.copyfile(local_path, dest_path)
+        extracted += 1
+        logging.info(f"Extracted {fname} to {dest_path}")
+
+    logging.info(f"[Completed] Extracted {extracted} new GA4 partition(s) to {tmp_dir}")
+
+def load_raw_to_minio(**kwargs):
+    """
+    Upload extracted GA4 parquet files from /opt/airflow/tmp to MinIO. (Can be resued with S3)
+    """
+
+    uploaded = 0
+
+    s3 = boto3.client(
+        "s3",
+        endpoint_url="http://minio:9000",
+        aws_access_key_id="minio",
+        aws_secret_access_key="miniopass",
+        region_name="us-east-1",
+    )
+
+    # ensure bucket exists (or is already owned by us)
+    try:
+        s3.head_bucket(Bucket=raw_bucket)
+        logging.info(f"Bucket '{raw_bucket}' already exists.")
+    except ClientError as e:
+        if e.response["Error"]["Code"] in ("404", "NoSuchBucket"):
+            s3.create_bucket(Bucket=raw_bucket)
+            logging.info(f"Created bucket '{raw_bucket}'.")
+        else:
+            raise   # any other error is fatal
+
+    # upload every parquet file from /tmp/
+    for fname in os.listdir(tmp_dir):
+        if not fname.endswith(".parquet"):
+            continue
+
+        file_path   = os.path.join(tmp_dir, fname)
+        object_key  = f"raw/{fname}"
+
+        # skip if object already exists
+        try:
+            s3.head_object(Bucket=raw_bucket, Key=object_key)
+            logging.info(f"Skipped upload; already in bucket: {object_key}")
+            continue
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "404":
+                raise
+
+        s3.upload_file(file_path, raw_bucket, object_key)
+        uploaded += 1
+        logging.info(f"Uploaded {fname} to s3://{raw_bucket}/{object_key}")
+
+    if uploaded == 0: logging.info("No data found in /tmp/ folder!")
+
+    logging.info(f"[Completed] Uploaded {uploaded} new daily GA4 partition(s) into MinIO bucket '{raw_bucket}/raw'.")
+
+
+# Declare DAG with Tasks
+with DAG(
+        dag_id='ga4_batch_dag',
+        default_args=default_args,
+        schedule=timedelta(days=1),
+        description="GA4 Batched Pipeline",
+        catchup=False,
+        tags=["main"],
+) as dag:
+    
+    extract_raw_task = PythonOperator(
+        task_id='extract_raw',
+        python_callable=extract_raw_data
+    )
+
+    extract_raw_task.doc_md = textwrap.dedent(
+        """\
+    ### Batch extract raw GA4 data from local source.
+
+    * Reads local raw parquet files from /opt/airflow/raw-data/
+    * Skips today's date (in case data may still be changing)
+    * if file already exists in MinIO bucket "ga4-bronze", skip
+    * Copies new files to /opt/airflow/tmp/
+    """
+    )
+
+    load_raw_to_minio_task = PythonOperator(
+        task_id='load_raw_to_minio',
+        python_callable=load_raw_to_minio
+    )
+
+    load_raw_to_minio_task.doc_md = textwrap.dedent(
+        """\
+    Upload extracted GA4 parquet files from /opt/airflow/tmp to MinIO.
+    * Task can be reused with S3
+    * Bucket: ga4-bronze
+    * Key: raw/<filename>
+    * Idempotent: skips objects that already exist
+    """
+    )
+
+    # trigger Spark job with BashOperator
+    # transform_with_spark_task = BashOperator(
+    #     task_id='transform_with_spark',
+    #     bash_command='spark-submit --master local[2] /opt/spark_jobs/spark_batch_job.py'
+    # )
+
+# Define the DAG
+    _ = extract_raw_task >> load_raw_to_minio_task
+
+
