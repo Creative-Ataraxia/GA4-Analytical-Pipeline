@@ -1,0 +1,7 @@
+.env
+minio-data/
+postgres-data/
+airflow-log/
+spark-events/
+raw-data/
+archived/

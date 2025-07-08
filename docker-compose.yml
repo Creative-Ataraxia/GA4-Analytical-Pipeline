@@ -6,136 +6,224 @@ networks:
     driver: bridge
 
 # ─────────
-#  Volumes
+#  volumes
 # ─────────
 volumes:
-  minio-data:
   postgres-data:
-  airflow-logs:
-  spark-events:
+
+# ─────────────────────
+#  Reused Airflow Envs
+# ─────────────────────
+x-airflow-common:
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://postgres:postgres@postgres:5432/ga4
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    # AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/' # Only required if you run tasks via remote Execution API.
+    # AIRFLOW__LOGGING__LOGGING_LEVEL: 'DEBUG'
+  volumes: &airflow-common-volumes
+    - ./dags:/opt/airflow/dags
+    - ./raw-data:/opt/airflow/raw-data/
+    - ./airflow-log:/opt/airflow/logs
+    - ./airflow-config:/opt/airflow/config
+    - ./airflow-plugins:/opt/airflow/plugins
+  depends_on: &airflow-common-depends
+    minio:
+      condition: service_healthy
+    postgres:
+      condition: service_healthy
+    airflow-init:
+      condition: service_completed_successfully
 
 # ──────────
 #  Services
 # ──────────
 services:
-
-  # 1. MinIO ─ S3-compatible object store
+# ─────────────────────────────────────
+# 1. MinIO; S3-compatible object store
+# ─────────────────────────────────────
   minio:
-    image: minio/minio:latest
+    image: minio/minio:latest # pin version in prod
+    container_name: minio
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER:     minio
-      MINIO_ROOT_PASSWORD: minio
+      MINIO_ROOT_PASSWORD: miniopass
     ports:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - minio-data:/data
-    networks: [ ga4-net ]
+      - ./minio-data:/data
+    networks:
+      - ga4-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      start_period: 10s
+      interval: 5s
+      timeout: 10s
+      retries: 5
+    restart: no
 
-  # 2. Postgres ─ analytics + Airflow metadata
+# ────────────
+# 2. Postgres
+# ────────────
   postgres:
-    image: postgres:latest
+    image: postgres:latest # pin version in prod
+    container_name: postgres
     environment:
-      POSTGRES_USER:     postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB:       ga4
-    ports: [ "5432:5432" ]
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    networks: [ ga4-net ]
-
-  # 3. Spark Master
-  spark-master:
-    image: bitnami/spark:latest          # pin later, e.g. 3.5.1
-    environment:
-      SPARK_MODE: master
-    depends_on: [ minio, postgres ]
-    ports:
-      - "7077:7077"
-      - "8080:8080"
-    volumes:
-      - spark-events:/opt/spark-events
-    networks: [ ga4-net ]
-
-  # 4. Spark Worker (scale out with `--scale spark-worker=2`)
-  spark-worker:
-    image: bitnami/spark:latest
-    environment:
-      SPARK_MODE: worker
-      SPARK_MASTER_URL: spark://spark-master:7077
-    depends_on: [ spark-master ]
-    ports:
-      - "8081:8081"
-    volumes:
-      - spark-events:/opt/spark-events
-    networks: [ ga4-net ]
-
-  # 5. Airflow (init → web + scheduler pattern)
-  airflow-init:
-    image: apache/airflow:latest
-    environment: &airflow-env
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://postgres:postgres@postgres:5432/ga4
-      AIRFLOW__CORE__FERNET_KEY: d3faultfernetkey
-      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      AIRFLOW__CORE__LOAD_DEFAULT_CONNECTIONS: "false"
-      AIRFLOW_HOME: /opt/airflow
-    entrypoint: |
-      bash -c "
-        airflow db init &&
-        airflow users create \
-          --username admin --firstname Admin --lastname User \
-          --role Admin --password admin --email admin@example.com
-      "
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - airflow-logs:/opt/airflow/logs
-    networks: [ ga4-net ]
-    depends_on: [ postgres ]
-
-  airflow-webserver:
-    image: apache/airflow:latest
-    environment: *airflow-env
-    command: webserver
-    ports: [ "8088:8080" ]
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - airflow-logs:/opt/airflow/logs
-    networks: [ ga4-net ]
-    depends_on: [ airflow-init ]
-
-  airflow-scheduler:
-    image: apache/airflow:latest
-    environment: *airflow-env
-    command: scheduler
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - airflow-logs:/opt/airflow/logs
-    networks: [ ga4-net ]
-    depends_on: [ airflow-init ]
-
-  # 6. dbt CLI (tests + parity diff)
-  dbt:
-    image: ghcr.io/dbt-labs/dbt-postgres:1.8.0
-    environment:
-      DBT_PROFILES_DIR: /workspace/profiles
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: ga4
+    ports:
+      - "5432:5432"
     volumes:
-      - ./dbt:/workspace
-    networks: [ ga4-net ]
-    depends_on: [ postgres ]
+      - postgres-data:/var/lib/postgresql/data # safer to let docker manage postgres' disk
+    networks:
+      - ga4-net
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      start_period: 5s
+      interval: 5s
+      timeout: 10s
+      retries: 5
+    restart: no
 
-  # 7. Optional Jupyter notebook
-  pyspark-notebook:
-    image: jupyter/pyspark-notebook:python-3.11
+# ────────────────────
+# 3. Airflow Services
+# ────────────────────
+  airflow-init:
+    image: apache/airflow:3.0.2
+    container_name: airflow-init
+    command: version
+    networks: [ga4-net]
+    volumes: *airflow-common-volumes
     environment:
-      SPARK_MASTER: spark://spark-master:7077
-    ports: [ "8888:8888" ]
-    networks: [ ga4-net ]
-    depends_on: [ spark-master ]
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
+    user: "0:0"
+    depends_on:
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  airflow-apiserver:
+    image: apache/airflow:3.0.2
+    container_name: airflow-apiserver
+    command: api-server
+    networks: [ga4-net]
+    user: "0:0"
+    volumes: *airflow-common-volumes
+    environment:
+      <<: *airflow-common-env
+    ports: ["8080:8080"]
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/version"]
+      start_period: 15s
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    restart: no
+    depends_on: *airflow-common-depends
+
+  airflow-scheduler:
+    image: apache/airflow:3.0.2
+    container_name: airflow-scheduler
+    command: scheduler
+    networks: [ga4-net]
+    user: "0:0"
+    volumes: *airflow-common-volumes
+    environment:
+      <<: *airflow-common-env
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      start_period: 15s
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    restart: no
+    depends_on: *airflow-common-depends
+
+  airflow-dag-processor:
+    image: apache/airflow:3.0.2
+    container_name: airflow-dag-processor
+    command: dag-processor
+    networks: [ga4-net]
+    user: "0:0"
+    volumes: *airflow-common-volumes
+    environment:
+      <<: *airflow-common-env
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
+      start_period: 15s
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    restart: no
+    depends_on: *airflow-common-depends
+
+  airflow-triggerer:
+    image: apache/airflow:3.0.2
+    container_name: airflow-triggerer
+    command: triggerer
+    networks: [ga4-net]
+    user: "0:0"
+    volumes: *airflow-common-volumes
+    environment:
+      <<: *airflow-common-env
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
+      start_period: 15s
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    restart: no
+    depends_on: *airflow-common-depends
+
+# ──────────────────
+# 4. Spark Services
+# ──────────────────
+  spark-master:
+    image: bitnami/spark:4.0.0
+    container_name: spark-master
+    networks:
+      - ga4-net
+    ports:
+      - "7077:7077"
+      - "8088:8080"
+    environment:
+      SPARK_MODE: master
+      HOME: /tmp
+    volumes:
+      - ./spark-events:/opt/spark-events
+      - ./spark:/opt/bitnami/spark/spark-jobs
+    depends_on:
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  spark-worker:
+    image: bitnami/spark:4.0.0   # don't include 'container_name', can't scale; docker name: ga4-analytical-pipeline-spark-worker-1
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      HOME: /tmp
+    networks:
+      - ga4-net
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./spark-events:/opt/spark-events
+      - ./spark:/opt/bitnami/spark/spark-jobs
+    depends_on:
+      - spark-master
+
+
