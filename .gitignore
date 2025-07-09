@@ -1,3 +1,4 @@
+libs/
 .env
 minio-data/
 postgres-data/

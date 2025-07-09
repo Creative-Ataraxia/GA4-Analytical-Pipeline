@@ -7,47 +7,34 @@ minimum_spark_test.py
 
 import logging, sys
 from pyspark.sql import SparkSession
-from pyspark.sql.utils import AnalysisException
+from pyspark.errors.exceptions.base import AnalysisException
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
-
-# MinIO (S3-compatible) Configurations
-MINIO_ENDPOINT = "http://minio:9000"
-MINIO_ACCESS_KEY = "minio"
-MINIO_SECRET_KEY = "miniopass"
-RAW_PATH = "s3a://ga4-bronze/raw/events_*.parquet"
-
 spark = None
 
 try:
     spark = (
         SparkSession.builder
-        .appName("is-spark-working")
+        .appName("spark-minio-smoketest")
         .master("spark://spark-master:7077")
-        # S3A options
-        .config("spark.hadoop.fs.s3a.endpoint",              MINIO_ENDPOINT)
-        .config("spark.hadoop.fs.s3a.access.key",            MINIO_ACCESS_KEY)
-        .config("spark.hadoop.fs.s3a.secret.key",            MINIO_SECRET_KEY)
+        .config("spark.hadoop.fs.s3a.endpoint",              "http://minio:9000")
+        .config("spark.hadoop.fs.s3a.access.key",            "minio")
+        .config("spark.hadoop.fs.s3a.secret.key",            "miniopass")
         .config("spark.hadoop.fs.s3a.path.style.access",     "true")
-        .config("spark.hadoop.fs.s3a.connection.ssl.enabled","false")
-        # Disable Kerberos
-        .config("spark.driver.extraJavaOptions",   "-Dhadoop.security.authentication=simple")
-        .config("spark.executor.extraJavaOptions", "-Dhadoop.security.authentication=simple")
         .getOrCreate()
     )
 
-    logging.info("Reading GA4 parquet files from %s …", RAW_PATH)
-    df = spark.read.parquet(RAW_PATH)
+    logging.info("Connected to MinIO, reading a single file as a test...")
+    df = spark.read.parquet("s3a://ga4-bronze/raw/events_20210131.parquet")
 
     if df.rdd.isEmpty():
         raise ValueError("No rows found in source files.")
 
-    logging.info("Row count: %d", df.count())
-    df.show(3, truncate=False)
-    logging.info("spark is working!")
+    logging.info("File events_20210131 has %d rows", df.count())
+    logging.info("Spark is working!")
 
 except AnalysisException as e:
     logging.error("Spark DataFrame operation failed: %s", e)
@@ -58,3 +45,7 @@ except Exception as e:
 finally:
     if spark is not None:
         spark.stop()
+
+
+# note: must use the correct version of hadoop-aws with the underlying hadoop version of spark;
+# e.g., apache/spark:4.0.0 built for hadoop > 3.4+; so we need hadoop-aws:3.4.1

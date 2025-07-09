@@ -194,37 +194,39 @@ services:
   spark-master:
     image: apache/spark:4.0.0
     container_name: spark-master
-    networks:
-      - ga4-net
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
+    networks: [ga4-net]
     ports:
-      - "7077:7077"
-      - "8088:8080"
+      - "7077:7077"   # Spark Master port
+      - "8088:8080"   # Web UI
     environment:
-      SPARK_MODE: master
-      HOME: /tmp
+      SPARK_MASTER_HOST: spark-master
+      SPARK_HOME: /opt/spark
+    user: "0:0"
     volumes:
-      - ./spark-events:/opt/spark-events
-      - ./spark:/opt/bitnami/spark/spark-jobs
-    depends_on:
-      minio:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
+      - ./spark-events:/opt/spark/logs
+      - ./spark:/opt/spark-apps
+      - ./libs:/opt/spark/libs
 
   spark-worker:
-    image: apache/spark:4.0.0   # don't include 'container_name', can't scale; docker name: ga4-analytical-pipeline-spark-worker-1
-    environment:
-      SPARK_MODE: worker
-      SPARK_MASTER_URL: spark://spark-master:7077
-      HOME: /tmp
-    networks:
-      - ga4-net
+    image: apache/spark:4.0.0
+    container_name: spark-worker
+    command:
+      [
+        "/opt/spark/bin/spark-class",
+        "org.apache.spark.deploy.worker.Worker",
+        "spark://spark-master:7077"
+      ]
+    networks: [ga4-net]
     ports:
-      - "8081:8081"
+      - "8081:8081"   # Worker UI
+    environment:
+      SPARK_WORKER_CORES: 1
+      SPARK_HOME: /opt/spark
+    user: "0:0"
     volumes:
-      - ./spark-events:/opt/spark-events
-      - ./spark:/opt/bitnami/spark/spark-jobs
+      - ./spark-events:/opt/spark/work
+      - ./spark:/opt/spark-apps
+      - ./libs:/opt/spark/libs
     depends_on:
       - spark-master
-
-
