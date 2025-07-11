@@ -11,11 +11,12 @@ from botocore.exceptions import ClientError
 from airflow import DAG
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.providers.standard.operators.bash import BashOperator
+from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
 
 
 default_args = {
     'owner': 'airflow',
-    'start_date': datetime(2023, 1, 1),
+    'start_date': datetime(2020, 11, 1),
     'retries': 0,
     'retry_delay': timedelta(minutes=5)
 }
@@ -24,6 +25,10 @@ default_args = {
 raw_bucket = "ga4-bronze"
 local_raw_dir = "/opt/airflow/raw-data"
 tmp_dir = "/opt/airflow/tmp"
+spark_job_args = {
+    'base_ga4_events': {'date': '2020-11-01', 'days': '1'},
+    'stg_ga4_events': {'date': '2020-11-01', 'days': '1'}
+}
 
 
 def extract_raw_data(**kwargs):
@@ -170,13 +175,68 @@ with DAG(
     """
     )
 
-    # trigger Spark job with BashOperator
-    # transform_with_spark_task = BashOperator(
-    #     task_id='transform_with_spark',
-    #     bash_command='spark-submit --master local[2] /opt/spark_jobs/spark_batch_job.py'
-    # )
+    base_ga4_events_task = SparkSubmitOperator(
+        task_id='base_ga4_events',
+        conn_id='airflow-spark-conn',
+        application='/opt/spark-apps/staging/base_ga4_events.py',
+        name='base_ga4_events_job',
+        application_args=[
+            f"{spark_job_args['base_ga4_events']['date']}",
+            f"{spark_job_args['base_ga4_events']['days']}"
+        ], # days count backwards, inclusive
+        jars=','.join([
+            '/opt/spark/libs/hadoop-aws-3.4.1.jar',
+            '/opt/spark/libs/aws-java-sdk-bundle-1.12.655.jar',
+            '/opt/spark/libs/aws-sdk-bundle-2.24.6.jar',
+            '/opt/spark/libs/wildfly-openssl-1.1.3.Final.jar'
+        ]),
+        env_vars={
+            'PYTHONPATH': '/opt/spark-apps',
+            "JAVA_HOME": "/usr/lib/jvm/java-17-openjdk-amd64"
+        }
+    )
 
+    base_ga4_events_task.doc_md = textwrap.dedent(
+        """\
+        Spark batch job to implement the GA4 base events model:
+        * Reads raw GA4 Parquet files from MinIO (s3a)
+        * Applies base_select_source and base_select_renamed transforms
+        * Deduplicates events by key+payload
+        * Writes out partitioned Parquet back to MinIO
+        """
+    )
+
+    stg_ga4_events_task = SparkSubmitOperator(
+        task_id='stg_ga4_events',
+        conn_id='airflow-spark-conn',
+        application='/opt/spark-apps/staging/stg_ga4_events.py',
+        name='stg_ga4_events_job',
+        application_args=[
+            f"{spark_job_args['stg_ga4_events']['date']}",
+            f"{spark_job_args['stg_ga4_events']['days']}"
+        ],
+        jars=','.join([
+            '/opt/spark/libs/hadoop-aws-3.4.1.jar',
+            '/opt/spark/libs/aws-java-sdk-bundle-1.12.655.jar',
+            '/opt/spark/libs/aws-sdk-bundle-2.24.6.jar',
+            '/opt/spark/libs/wildfly-openssl-1.1.3.Final.jar'
+        ]),
+        env_vars={
+            'PYTHONPATH': '/opt/spark-apps',
+            "JAVA_HOME": "/usr/lib/jvm/java-17-openjdk-amd64"
+        }
+    )
+
+    stg_ga4_events_task.doc_md = textwrap.dedent(
+        """\
+        Spark job to build GA4 staging events model (stg_ga4_events)
+        * Reads transformed base events (s3a://ga4-bronze/base_ga4_events)
+        * Adds client, session, event keys; detects gclid; cleans URLs
+        * Extracts hostname and query string; computes page keys
+        * Writes partitioned by event_date_dt to s3a://ga4-bronze/stg_ga4_events
+        """
+    )
 # Define the DAG
-    _ = extract_raw_task >> load_raw_to_minio_task
+    _ = extract_raw_task >> load_raw_to_minio_task >> base_ga4_events_task >> stg_ga4_events_task
 
 

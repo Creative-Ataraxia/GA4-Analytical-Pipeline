@@ -2,9 +2,10 @@
 {
   "name": "ga4-dev",
   "build": {
-    "context": "..",                        // repo root
-    "dockerfile": "Dockerfile"  // path inside repo
+    "context": "..",           // relative to where this json is
+    "dockerfile": "Dockerfile" // relative to where this json is
   },
+  "runArgs": ["--image-name", "ga4-devcontainer"],
   "remoteUser": "root",
   "workspaceFolder": "/workspace",
   "customizations": {
@@ -18,12 +19,12 @@
       },
       "extensions": [
         "ms-python.python",
-        "ms-python.vscode-pylance"
+        "ms-python.vscode-pylance",
+        "hinotatwu-DS.file-tree-generator"
       ]
     }
   },
   "mounts": [
     "source=${localWorkspaceFolder},target=/workspace,type=bind"
-  ],
-  "postCreateCommand": "pip install --upgrade pip && pip install -r requirements.txt"
+  ]
 }

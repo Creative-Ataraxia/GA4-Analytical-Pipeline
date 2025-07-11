@@ -1,5 +1,8 @@
+pyspark==4.0.0
+apache-airflow==3.0.2
+apache-airflow-providers-postgres
+apache-airflow-providers-apache-spark
+
 pytest
 boto3
 great_expectations
-apache-airflow-providers-postgres
-pyspark

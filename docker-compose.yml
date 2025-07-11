@@ -16,6 +16,7 @@ volumes:
 # ─────────────────────
 x-airflow-common:
   environment: &airflow-common-env
+    JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://postgres:postgres@postgres:5432/ga4
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
@@ -32,6 +33,8 @@ x-airflow-common:
     - ./airflow/airflow-log:/opt/airflow/logs
     - ./airflow/airflow-config:/opt/airflow/config
     - ./airflow/airflow-plugins:/opt/airflow/plugins
+    - ./spark:/opt/spark-apps
+    - ./libs:/opt/spark/libs/
   depends_on: &airflow-common-depends
     minio:
       condition: service_healthy
@@ -127,7 +130,7 @@ services:
     ports: ["8080:8080"]
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/version"]
-      start_period: 15s
+      start_period: 10s
       interval: 15s
       timeout: 10s
       retries: 5
@@ -198,7 +201,8 @@ services:
     networks: [ga4-net]
     ports:
       - "7077:7077"   # Spark Master port
-      - "8088:8080"   # Web UI
+      - "8088:8080"   # spark master UI, changed from default 8080 to avoid conflict with airflow apiserver; note, not full spark UI
+      - "4040:4040"   # full UI; only runs when there are running jobs
     environment:
       SPARK_MASTER_HOST: spark-master
       SPARK_HOME: /opt/spark

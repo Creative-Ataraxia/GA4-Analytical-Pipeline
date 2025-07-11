@@ -1,3 +1,4 @@
 boto3
 great_expectations
 apache-airflow-providers-postgres
+apache-airflow-providers-apache-spark

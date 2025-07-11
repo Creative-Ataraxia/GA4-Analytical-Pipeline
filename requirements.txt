@@ -1,5 +1,0 @@
-pytest
-boto3
-great_expectations
-apache-airflow-providers-postgres
-pyspark

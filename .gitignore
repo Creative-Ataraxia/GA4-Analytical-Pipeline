@@ -4,5 +4,6 @@ minio-data/
 postgres-data/
 airflow-log/
 spark-events/
+spark/archived/
 raw-data/
 archived/
