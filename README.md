@@ -82,5 +82,4 @@ Happy to answer any question via issues; Connect with me on [Linkedin](https://w
 My [Github Page](https://github.com/Creative-Ataraxia)
 
 ### License
-This project is licensed under the MIT
-[![License](https://img.shields.io/github/license/Creative-Ataraxia/GA4-Analytical-Pipeline)](LICENSE)
+This project is licensed under the MIT License, see the file `LICENSE` for details
