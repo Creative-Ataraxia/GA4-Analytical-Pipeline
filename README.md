@@ -85,6 +85,7 @@ docker exec -it postgres psql -U postgres -d ga4_data -c "SELECT COUNT(*) FROM s
 
 ### About
 Happy to answer any question via issues; Connect with me on [Linkedin](https://www.linkedin.com/in/royma/);
+My [Github Page](https://github.com/Creative-Ataraxia)
 
 ### License
 This project is licensed under the MIT
