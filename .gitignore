@@ -7,3 +7,6 @@ spark-events/
 spark/archived/
 raw-data/
 archived/
+airflow/dags/__pycache__/
+spark/common/__pycache__/
+airflow/dags/test_load_stg_ga4_events.py

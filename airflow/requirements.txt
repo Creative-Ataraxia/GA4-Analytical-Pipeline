@@ -1,4 +1,6 @@
 boto3
+s3fs
+pandas
 great_expectations
 apache-airflow-providers-postgres
 apache-airflow-providers-apache-spark

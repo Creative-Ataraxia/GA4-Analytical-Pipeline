@@ -1,17 +1,19 @@
-import os
-import shutil
-import logging
+import os, io, json, shutil, logging
 from datetime import datetime, timedelta
+import logging
 import textwrap
 
 import boto3
-from botocore.client import Config
+import s3fs
+import pandas as pd
+import numpy as np
 from botocore.exceptions import ClientError
 
 from airflow import DAG
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.providers.standard.operators.bash import BashOperator
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
+from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 
 default_args = {
@@ -26,8 +28,8 @@ raw_bucket = "ga4-bronze"
 local_raw_dir = "/opt/airflow/raw-data"
 tmp_dir = "/opt/airflow/tmp"
 spark_job_args = {
-    'base_ga4_events': {'date': '2020-11-01', 'days': '1'},
-    'stg_ga4_events': {'date': '2020-11-01', 'days': '1'}
+    'base_ga4_events': {'date': '2020-11-01', 'days': '1'}, # for ingestion, day counts backwards; inclusive
+    'stg_ga4_events': {'date': '2020-11-01', 'days': '1'}   # for transformations, day counts forward; inclusive
 }
 
 
@@ -133,6 +135,171 @@ def load_raw_to_minio(**kwargs):
 
     logging.info(f"[Completed] Uploaded {uploaded} new daily GA4 partition(s) into MinIO bucket '{raw_bucket}/raw'.")
 
+def load_stg_events_to_postgres(**context):
+    """
+    Load all partitions of stg_ga4_events Parquet into Postgres staging table.
+    - Reads entire s3a://ga4-bronze/stg_ga4_events dataset
+    - Injects partition column event_date_dt
+    - JSON-encodes nested columns for JSONB storage
+    - Creates table if missing, truncates before load
+    - Bulk loads via COPY for performance
+    - Logs each key step
+    """
+    
+    # 1) Read full Parquet dataset into 1 giant pandas df; adjust your container/airflow worker mem
+    fs = s3fs.S3FileSystem(   
+        client_kwargs={'endpoint_url': 'http://minio:9000'},
+        key='minio',
+        secret='miniopass',
+        use_ssl=False
+    )
+    path = "ga4-bronze/stg_ga4_events"
+    logging.info(f"Reading partitions from bucket: {path}")
+
+    df = pd.read_parquet( # unlike spark, pandas does not read the event_date_dt (from DB path) back into the data
+        path=path,
+        filesystem=fs,
+        engine='pyarrow'
+    )
+    logging.info(f"Loaded {len(df)} rows and {len(df.columns)} columns")
+
+    # 3) JSON-encode nested columns
+    def safe_serialize(val):
+        if val is None:
+            return None
+        if isinstance(val, np.ndarray):
+            val = val.tolist()
+        return json.dumps(val)
+
+    for c in ['ecommerce', 'items', 'event_params']:
+        if c in df.columns:
+            logging.info(f"JSON-encoding column '{c}'")
+            df[c] = df[c].apply(safe_serialize)
+        else:
+            logging.info(f"Column '{c}' not found, skipping JSON encode")
+
+    # 4) Connect to Postgres
+    logging.info("Connecting to Postgres...")
+    hook = PostgresHook(postgres_conn_id='airflow-postgres-conn') # connects to the db set in airflow's connection profile, here ga4_data
+    conn = hook.get_conn() # besure the DB (ga4_data) already exists in postgres
+    cur = conn.cursor()
+
+    
+
+    # 5) Create staging table if not exists
+    logging.info("Ensuring stg_ga4_events table exists in DB")
+    cur.execute('''
+    CREATE TABLE IF NOT EXISTS stg_ga4_events (
+      event_key TEXT PRIMARY KEY,
+      _event_date_dt DATE,
+      event_timestamp BIGINT,
+      event_name TEXT,
+      privacy_info_analytics_storage INT,
+      privacy_info_ads_storage INT,
+      privacy_info_uses_transient_token TEXT,
+      user_id TEXT,
+      user_pseudo_id TEXT,
+      user_first_touch_timestamp BIGINT,
+      user_ltv_revenue DOUBLE PRECISION,
+      user_ltv_currency TEXT,
+      device_category TEXT,
+      device_mobile_brand_name TEXT,
+      device_mobile_model_name TEXT,
+      device_mobile_marketing_name TEXT,
+      device_mobile_os_hardware_model BIGINT,
+      device_operating_system TEXT,
+      device_operating_system_version TEXT,
+      device_vendor_id BIGINT,
+      device_advertising_id BIGINT,
+      device_language TEXT,
+      device_is_limited_ad_tracking TEXT,
+      device_time_zone_offset_seconds BIGINT,
+      geo_continent TEXT,
+      geo_country TEXT,
+      geo_region TEXT,
+      geo_city TEXT,
+      geo_sub_continent TEXT,
+      geo_metro TEXT,
+      app_info_id TEXT,
+      app_info_version TEXT,
+      app_info_install_store TEXT,
+      app_info_firebase_app_id TEXT,
+      app_info_install_source TEXT,
+      user_campaign TEXT,
+      user_medium TEXT,
+      user_source TEXT,
+      stream_id BIGINT,
+      platform TEXT,
+      ecommerce JSONB,
+      items JSONB,
+      session_id BIGINT,
+      page_location TEXT,
+      session_number INT,
+      engagement_time_msec BIGINT,
+      page_title TEXT,
+      page_referrer TEXT,
+      event_source TEXT,
+      event_medium TEXT,
+      event_campaign TEXT,
+      event_content TEXT,
+      event_term TEXT,
+      session_engaged BIGINT,
+      is_page_view INT,
+      is_purchase INT,
+      property_id BIGINT,
+      event_params JSONB,
+      client_key TEXT,
+      session_key TEXT,
+      session_partition_key TEXT,
+      original_page_location TEXT,
+      original_page_referrer TEXT,
+      page_path TEXT,
+      page_hostname TEXT,
+      page_query_string TEXT,
+      page_key TEXT,
+      page_engagement_key TEXT
+    );
+    ''')
+    conn.commit()
+    logging.info("Table check/creation complete")
+
+    # 6) Truncate table for idempotent load
+    logging.info("Truncating stg_ga4_events table in case old data already exists")
+    cur.execute("TRUNCATE TABLE stg_ga4_events;")
+    conn.commit()
+
+    # Ensure BIGINT fields are cast to integer so Postgres COPY won't fail
+    bigint_cols = [
+        'event_timestamp',
+        'user_first_touch_timestamp',
+        'device_time_zone_offset_seconds',
+        'device_vendor_id',
+        'device_advertising_id',
+        'stream_id',
+        'session_id',
+        'engagement_time_msec',
+        'session_engaged',
+        'property_id'
+    ]
+    for col_name in bigint_cols:
+        if col_name in df.columns:
+            df[col_name] = pd.to_numeric(df[col_name], errors='coerce').astype('Int64') # NaN allowed (int64 does not)
+
+    # 7) Bulk load via COPY
+    logging.info("Starting bulk COPY into Postgres")
+    buffer = io.StringIO()
+    df.to_csv(buffer, header=False, index=False)
+    buffer.seek(0)
+    cols = ','.join(df.columns)
+    copy_sql = f"COPY stg_ga4_events ({cols}) FROM STDIN WITH (FORMAT CSV)"
+    cur.copy_expert(copy_sql, buffer)
+    conn.commit()
+    logging.info(f"Loaded {len(df)} rows into stg_ga4_events table")
+
+    # 8) Clean up
+    cur.close()
+    conn.close()
+    logging.info("Postgres connection closed")
 
 # Declare DAG with Tasks
 with DAG(
@@ -236,7 +403,23 @@ with DAG(
         * Writes partitioned by event_date_dt to s3a://ga4-bronze/stg_ga4_events
         """
     )
+
+    load_stg_events_to_pg_task = PythonOperator(
+        task_id='load_stg_events_to_pg',
+        python_callable=load_stg_events_to_postgres
+    )
+
+    load_stg_events_to_pg_task.doc_md = textwrap.dedent(
+        """\
+        Load all partitions of stg_ga4_events Parquet into Postgres staging table.
+        * Reads entire s3a://ga4-bronze/stg_ga4_events dataset
+        * Injects partition column event_date_dt
+        * JSON-encodes nested columns for JSONB storage
+        * Creates table if missing, truncates before load
+        * Bulk loads via COPY for performance
+        * Logs each key step
+        """
+    )
+
 # Define the DAG
-    _ = extract_raw_task >> load_raw_to_minio_task >> base_ga4_events_task >> stg_ga4_events_task
-
-
+    _ = extract_raw_task >> load_raw_to_minio_task >> base_ga4_events_task >> stg_ga4_events_task >> load_stg_events_to_pg_task

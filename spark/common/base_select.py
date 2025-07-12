@@ -138,8 +138,6 @@ def base_select_renamed(df: DataFrame) -> DataFrame:
                 "case when params_map.session_engaged.string_value = '1' then 1 end)"
             )
         )
-        # drop raw arrays since we have extracted what we need
-        .drop("event_params")
     )
 
     # 3) Final flatten & rename
@@ -241,7 +239,9 @@ def base_select_renamed(df: DataFrame) -> DataFrame:
         col("property_id"),
 
         # for dedup logic:
-        col("params_map")
+        col("params_map"),
+        # also keep event_params for stg_ga4_events
+        col("event_params")
     )
 
 

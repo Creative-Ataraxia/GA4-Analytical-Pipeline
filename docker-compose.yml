@@ -58,8 +58,8 @@ services:
       MINIO_ROOT_USER:     minio
       MINIO_ROOT_PASSWORD: miniopass
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "19000:9000" # change to 19000 bc freaking wsl ghost port binding!
+      - "19001:9001" # this is the webUI
     volumes:
       - ./minio-data:/data
     networks:

@@ -5,4 +5,5 @@ apache-airflow-providers-apache-spark
 
 pytest
 boto3
+s3fs
 great_expectations

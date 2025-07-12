@@ -41,65 +41,7 @@ from pyspark.sql.window import Window
 
 # import our reusable transforms
 from common.base_select import base_select_source, base_select_renamed
-
-
-def list_processed_dates(spark, output_prefix: str) -> set:
-    """
-    List event_date_dt partitions already written under `output_prefix`.
-    Expects folders named like output_prefix/event_date_dt=YYYY-MM-DD/.
-    Returns a set of ISO date strings (e.g. '2025-07-09').
-    """
-    
-    # Hadoop Path & FileSystem
-    hadoop_conf = spark._jsc.hadoopConfiguration()
-    Path = spark._jvm.org.apache.hadoop.fs.Path
-    path = Path(output_prefix)
-    fs = path.getFileSystem(hadoop_conf)
-
-    # Try listing; if the path doesn't exist, catch and return empty set
-    try:
-        statuses = fs.listStatus(path)
-    except Exception:
-        return set()
-
-    dates = set()
-    for status in statuses:
-        name = status.getPath().getName()  # e.g. 'event_date_dt=2025-07-10'
-        if status.isDirectory() and name.startswith("event_date_dt="):
-            # split off the prefix
-            _, date_str = name.split("=", 1)
-            dates.add(date_str)
-    return dates
-
-
-def list_raw_dates(spark, input_prefix: str) -> set:
-    """
-    List raw Parquet files under `input_prefix` named events_YYYYMMDD.parquet.
-    Returns a set of ISO date strings (e.g. '2025-07-10').
-    """
-
-    hadoop_conf = spark._jsc.hadoopConfiguration()
-    Path = spark._jvm.org.apache.hadoop.fs.Path
-    path = Path(input_prefix)
-    fs = path.getFileSystem(hadoop_conf)
-
-    try:
-        statuses = fs.listStatus(path)
-    except Exception:
-        return set()
-
-    dates = set()
-    for status in statuses:
-        name = status.getPath().getName()  # e.g. 'events_20250710.parquet'
-        if name.startswith("events_") and name.endswith(".parquet"):
-            part = name[len("events_"):-len(".parquet")]
-            # convert YYYYMMDD to ISO YYYY-MM-DD
-            try:
-                iso = datetime.strptime(part, "%Y%m%d").date().isoformat()
-                dates.add(iso)
-            except ValueError:
-                continue
-    return dates
+from common.ga4_spark_utils import list_processed_dates, list_raw_dates
 
 
 def normalize_date_str(date_str):

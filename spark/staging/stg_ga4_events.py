@@ -14,10 +14,10 @@ import sys
 from datetime import datetime, timedelta
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
-    col, expr, when, regexp_replace, lit,
+    col, expr, when, regexp_replace, lit, url_encode,
     md5, concat_ws, unhex, base64, to_json, parse_url
 )
-
+from common.ga4_spark_utils import list_processed_dates, list_raw_dates
 
 def main(start_date_str=None, days=None):
     # Input/Output prefixes
@@ -35,7 +35,7 @@ def main(start_date_str=None, days=None):
             .config("spark.hadoop.fs.s3a.access.key", "minio")
             .config("spark.hadoop.fs.s3a.secret.key", "miniopass")
             .config("spark.hadoop.fs.s3a.path.style.access", "true")
-            .config("spark.sql.sources.partitionOverwriteMode", "dynamic")
+            .config("spark.sql.sources.partitionOverwriteMode", "dynamic") # Spark will only replace the partitions present in this DataFrame. 
             .getOrCreate()
     )
 
@@ -46,7 +46,7 @@ def main(start_date_str=None, days=None):
     if start_date_str:
         start = datetime.fromisoformat(start_date_str).date()
         if days:
-            end = start + timedelta(days=days)
+            end = start + timedelta(days=days-1)
             df = df.filter(
                 (col("event_date_dt") >= lit(start)) &
                 (col("event_date_dt") <= lit(end))
@@ -80,7 +80,7 @@ def main(start_date_str=None, days=None):
             col("session_id").cast("string"),
             col("event_name"),
             col("event_timestamp").cast("string"),
-            to_json(col("params_map"))
+            to_json(col("event_params"))
         ))))
     )
 
@@ -114,18 +114,20 @@ def main(start_date_str=None, days=None):
     # 6) strip query params, keep originals
     df = (
         df
-        .withColumn("original_page_location", col("page_location"))
-        .withColumn("page_location", regexp_replace(col("page_location"), "\\?.*$", ""))
+        .withColumn("original_page_location", col("page_location")) # keep originals
+        .withColumn("original_page_location", url_encode(col("original_page_location"))) # percent-encode unsafe chars
+        .withColumn("page_location", regexp_replace(col("page_location"), "\\?.*$", "")) # strip off query string
         .withColumn("original_page_referrer", col("page_referrer"))
+        .withColumn("original_page_referrer", url_encode(col("original_page_referrer"))) 
         .withColumn("page_referrer", regexp_replace(col("page_referrer"), "\\?.*$", ""))
     )
 
     # 7) enrich URL fields: path, hostname, query string
     df = (
         df
-        .withColumn("page_path",     parse_url(col("original_page_location"), "PATH"))
-        .withColumn("page_hostname", parse_url(col("original_page_location"), "HOST"))
-        .withColumn("page_query_string", parse_url(col("original_page_location"), "QUERY"))
+        .withColumn("page_path",     parse_url(col("original_page_location"), lit("PATH")))
+        .withColumn("page_hostname", parse_url(col("original_page_location"), lit("HOST")))
+        .withColumn("page_query_string", parse_url(col("original_page_location"), lit("QUERY")))
     )
 
     # 8) page_key and page_engagement_key
@@ -146,40 +148,36 @@ def main(start_date_str=None, days=None):
         )
     )
 
-    # Final select to lock in output schema; for schema validation at-a-glance
-    final_cols = [
-        # base_ga4__events columns
-        "event_date_dt","event_timestamp","event_name",
-        "privacy_info_analytics_storage","privacy_info_ads_storage","privacy_info_uses_transient_token",
-        "user_id","user_pseudo_id","user_first_touch_timestamp",
-        "user_ltv_revenue","user_ltv_currency",
-        "device_category","device_mobile_brand_name","device_mobile_model_name",
-        "device_mobile_marketing_name","device_mobile_os_hardware_model",
-        "device_operating_system","device_operating_system_version",
-        "device_vendor_id","device_advertising_id","device_language",
-        "device_is_limited_ad_tracking","device_time_zone_offset_seconds",
-        "device_browser","device_browser_version",
-        "device_web_info_browser","device_web_info_browser_version",
-        "device_web_info_hostname",
-        "geo_continent","geo_country","geo_region","geo_city",
-        "geo_sub_continent","geo_metro",
-        "app_info_id","app_info_version","app_info_install_store",
-        "app_info_firebase_app_id","app_info_install_source",
-        "user_campaign","user_medium","user_source",
-        "stream_id","platform","ecommerce","items",
-        "session_id","page_location","session_number","engagement_time_msec",
-        "page_title","page_referrer","event_source","event_medium",
-        "event_campaign","event_content","event_term","session_engaged",
-        "is_page_view","is_purchase","property_id",
-        # staging additions
-        "client_key","session_key","session_partition_key","event_key",
-        "original_page_location","original_page_referrer","page_path",
-        "page_location","page_referrer","page_hostname","page_query_string",
-        "page_key","page_engagement_key"
+    all_cols = df.columns   # whatever survived all upstream steps
+
+    # the staging columns
+    staging_cols = [
+        "client_key", "session_key", "session_partition_key", "event_key",
+        "original_page_location", "original_page_referrer",
+        "page_path", "page_hostname", "page_query_string",
+        "page_key", "page_engagement_key"
     ]
-    df = df.select(*[col(c) for c in final_cols])
+
+    # keep only those staging_cols that really exist (they should!)
+    staging_cols = [c for c in staging_cols if c in all_cols]
+
+    # now build the final column order:
+    # start with everything that wasn't a staging col
+    # then append the staging cols in desired order
+    base_cols = [c for c in all_cols if c not in staging_cols]
+
+    # force event_date_dt to be first
+    if "event_date_dt" in base_cols:
+        base_cols.remove("event_date_dt")
+        base_cols = ["event_date_dt"] + base_cols
+
+    final_cols = base_cols + staging_cols
+
+    # and select in that order
+    df = df.select(*final_cols)
 
     # Write output
+    df = df.withColumn("_event_date_dt", col("event_date_dt")) # spark by default drop the column used to partitionBy
     df.write.mode("overwrite").partitionBy("event_date_dt").parquet(output_prefix)
     dates = [row.event_date_dt for row in df.select("event_date_dt").distinct().collect()]
     print(f"Wrote staging data to {output_prefix}, partitions: {dates}")
