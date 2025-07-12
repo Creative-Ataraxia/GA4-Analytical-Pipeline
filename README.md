@@ -23,6 +23,8 @@ A fully containerised **batch ETL stack** that ingests big scale [Google Analyti
                                                                  
 ```
 
+![Architecture](img/Archi.png)
+
 
 ### Data Sources
 
