@@ -11,10 +11,10 @@ from botocore.exceptions import ClientError
 
 from airflow import DAG
 from airflow.providers.standard.operators.python import PythonOperator
-from airflow.providers.standard.operators.bash import BashOperator
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 
+# if you chose to download the spark-aws jars locally, switch the `packages` flag in spark-submit to `jars`
 
 default_args = {
     'owner': 'airflow',
@@ -351,11 +351,17 @@ with DAG(
             f"{spark_job_args['base_ga4_events']['date']}",
             f"{spark_job_args['base_ga4_events']['days']}"
         ], # days count backwards, inclusive
-        jars=','.join([
-            '/opt/spark/libs/hadoop-aws-3.4.1.jar',
-            '/opt/spark/libs/aws-java-sdk-bundle-1.12.655.jar',
-            '/opt/spark/libs/aws-sdk-bundle-2.24.6.jar',
-            '/opt/spark/libs/wildfly-openssl-1.1.3.Final.jar'
+        # jars=','.join([
+        #     '/opt/spark/libs/hadoop-aws-3.4.1.jar',
+        #     '/opt/spark/libs/aws-java-sdk-bundle-1.12.655.jar',
+        #     '/opt/spark/libs/aws-sdk-bundle-2.24.6.jar',
+        #     '/opt/spark/libs/wildfly-openssl-1.1.3.Final.jar'
+        # ]),
+        packages = ','.join([
+            'org.apache.hadoop:hadoop-aws:3.4.1',
+            'com.amazonaws:aws-java-sdk-bundle:1.12.655',
+            'software.amazon.awssdk:bundle:2.24.6',
+            'org.wildfly.openssl:wildfly-openssl:1.1.3.Final'
         ]),
         env_vars={
             'PYTHONPATH': '/opt/spark-apps',
@@ -382,11 +388,17 @@ with DAG(
             f"{spark_job_args['stg_ga4_events']['date']}",
             f"{spark_job_args['stg_ga4_events']['days']}"
         ],
-        jars=','.join([
-            '/opt/spark/libs/hadoop-aws-3.4.1.jar',
-            '/opt/spark/libs/aws-java-sdk-bundle-1.12.655.jar',
-            '/opt/spark/libs/aws-sdk-bundle-2.24.6.jar',
-            '/opt/spark/libs/wildfly-openssl-1.1.3.Final.jar'
+        # jars=','.join([
+        #     '/opt/spark/libs/hadoop-aws-3.4.1.jar',
+        #     '/opt/spark/libs/aws-java-sdk-bundle-1.12.655.jar',
+        #     '/opt/spark/libs/aws-sdk-bundle-2.24.6.jar',
+        #     '/opt/spark/libs/wildfly-openssl-1.1.3.Final.jar'
+        # ]),
+        packages = ','.join([
+            'org.apache.hadoop:hadoop-aws:3.4.1',
+            'com.amazonaws:aws-java-sdk-bundle:1.12.655',
+            'software.amazon.awssdk:bundle:2.24.6',
+            'org.wildfly.openssl:wildfly-openssl:1.1.3.Final'
         ]),
         env_vars={
             'PYTHONPATH': '/opt/spark-apps',
