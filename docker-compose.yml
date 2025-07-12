@@ -70,7 +70,17 @@ services:
       interval: 5s
       timeout: 10s
       retries: 5
-    restart: no
+    restart: always
+
+  minio-init:
+    image: minio/minio:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c", "/scripts/create_buckets.sh"]
+    volumes:
+      - ./scripts/create_buckets.sh:/scripts/create_buckets.sh
+    network_mode: "service:minio"
 
 # ────────────
 # 2. Postgres
@@ -94,7 +104,7 @@ services:
       interval: 5s
       timeout: 10s
       retries: 5
-    restart: no
+    restart: always
 
 # ────────────────────
 # 3. Airflow Services
