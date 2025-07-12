@@ -1,9 +1,8 @@
-## Batch ETL Pipeline for Google Analytics 4 Data
+## Batch ETL Pipeline for Google Analytics 4
 
 ### Overview
 A fully containerised **batch ETL stack** that ingests big scale [Google Analytics 4](https://support.google.com/analytics) data, transforms it with Spark, orchestrates the workflow in Airflow, lands data facts/dimensions in Postgres for downstream ML/BI analysis.
 
----
 
 ### Tech Stack
 | Layers | Stack | Highlights |
@@ -14,7 +13,6 @@ A fully containerised **batch ETL stack** that ingests big scale [Google Analyti
 | Serve | Postgres | Data Warehouse with event, session & user dimensions |
 | Dev Ex | Docker Compose, Custom Images, Dev Container | Ready for production
 
----
 
 ### Architecture
 
@@ -25,13 +23,11 @@ A fully containerised **batch ETL stack** that ingests big scale [Google Analyti
                                                                  
 ```
 
----
 
 ### Data Sources
 
 Sample GA4 dataset extracted [BigQuery public datasets](https://cloud.google.com/bigquery/public-data) (92 days * 55,000 rows ~ 5M rows; pq table 68 columns)
 
----
 
 ### Data Models
 
@@ -41,13 +37,11 @@ Sample GA4 dataset extracted [BigQuery public datasets](https://cloud.google.com
 | base\_ga4\_events | cleaned events  | Flatten & Normalize records, standardized, dedup fields       |
 | stg\_ga4\_events  | keyed events    | Add surrogate key, sanitizes event parameters, preps for dims |
 
----
 
 ### Airflow DAG Screenshot
 
 ![Airflow DAG](img/DAG.png)
 
----
 
 ### Loaded Postgres Data Screenshot
 
