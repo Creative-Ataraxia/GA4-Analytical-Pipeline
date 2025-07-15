@@ -1,4 +1,4 @@
-## Batch ETL Pipeline for Google Analytics 4
+## Batch ETL Pipeline for Retail Analytics (Google Analytics 4)
 
 ### Overview
 A fully containerised **batch ETL stack** that ingests big scale [Google Analytics 4](https://support.google.com/analytics) data, transforms it with Spark, orchestrates the workflow in Airflow, lands data facts/dimensions in Postgres for downstream ML/BI analysis.
